@@ -20,6 +20,7 @@
 #include "sprdfb.h"
 #include "sprdfb_panel.h"
 #include "sprdfb_dispc_reg.h"
+#include <linux/display_state.h>
 
 static LIST_HEAD(panel_list_main);/* for main_lcd*/
 static LIST_HEAD(panel_list_sub);/* for sub_lcd */
@@ -34,6 +35,13 @@ extern struct panel_if_ctrl sprdfb_rgb_ctrl;
 extern struct panel_if_ctrl sprdfb_mipi_ctrl;
 #endif
 extern void sprdfb_panel_remove(struct sprdfb_device *dev);
+
+bool display_on = true;
+
+bool is_display_on(void)
+{
+ 	return display_on;
+}
 
 static int __init lcd_id_get(char *str)
 {
@@ -101,6 +109,8 @@ static int panel_reset(struct sprdfb_device *dev)
 		printk(KERN_ERR "sprdfb: [%s]: Invalid param\n", __FUNCTION__);
 		return -1;
 	}
+ 
+        display_on = true;
 
 	pr_debug("[LCD] %s, enter\n",__func__);
 
@@ -122,6 +132,8 @@ static int panel_sleep(struct sprdfb_device *dev)
 		printk(KERN_ERR "sprdfb: [%s]: Invalid param\n", __FUNCTION__);
 		return -1;
 	}
+
+        display_on = false; 
 
 	pr_debug("sprdfb: [%s], enter\n",__FUNCTION__);
 
