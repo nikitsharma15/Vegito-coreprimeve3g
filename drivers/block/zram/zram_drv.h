@@ -15,25 +15,14 @@
 #ifndef _ZRAM_DRV_H_
 #define _ZRAM_DRV_H_
 
-#include <linux/spinlock.h>
+#include <linux/rwsem.h>
 #include <linux/zsmalloc.h>
+#include <linux/crypto.h>
 
 #include "zcomp.h"
 
-/*
- * Some arbitrary value. This is just to catch
- * invalid value for num_devices module parameter.
- */
-static const unsigned max_num_devices = 32;
-
 extern u32 zram_compressed_size = 0;
 extern u32 zram_pages_stored = 0;
-
-/*
- * Some arbitrary value. This is just to catch
- * invalid value for num_devices module parameter.
- */
-static const unsigned max_num_devices = 32;
 
 /*-- Configurable parameters */
 
@@ -128,6 +117,6 @@ struct zram {
 	 * we can store in a disk.
 	 */
 	u64 disksize;	/* bytes */
-	char compressor[10];
+	char compressor[CRYPTO_MAX_ALG_NAME];
 };
 #endif
