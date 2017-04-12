@@ -985,19 +985,19 @@ LOCAL int _sensor_k_wr_regtab(struct sensor_file_tag *fd_handle, struct sensor_r
 	pBuff = _sensor_k_malloc(fd_handle, size);
 	if (PNULL == pBuff) {
 		ret = SENSOR_K_FAIL;
-		printk("sensor W RegTab err:alloc fail, cnt %d, size %d\n", cnt, size);
+		SENSOR_PRINT_ERR("sensor W RegTab err:alloc fail, cnt %d, size %d\n", cnt, size);
 		goto _Sensor_K_WriteRegTab_return;
 	} else {
-		printk("sensor W RegTab: alloc success, cnt %d, size %d \n",cnt, size);
+		SENSOR_PRINT("sensor W RegTab: alloc success, cnt %d, size %d \n",cnt, size);
 	}
 
 	if (copy_from_user(pBuff, pRegTab->sensor_reg_tab_ptr, size)) {
 		ret = SENSOR_K_FAIL;
-		printk("sensor w err:copy user fail, size %d \n", size);
+		SENSOR_PRINT_ERR("sensor w err:copy user fail, size %d \n", size);
 		goto _Sensor_K_WriteRegTab_return;
 	}
 
-	printk("_sensor_k_wr_regtab start: mode=%d, cnt=%d\n", pRegTab->burst_mode, cnt);
+	SENSOR_PRINT_HIGH("_sensor_k_wr_regtab start: mode=%d, cnt=%d\n", pRegTab->burst_mode, cnt);
 
 	sensor_reg_ptr = (struct sensor_reg_tag *)pBuff;
 
@@ -1023,7 +1023,7 @@ _Sensor_K_WriteRegTab_return:
 		_sensor_k_free(fd_handle, pBuff);
 
 	do_gettimeofday(&time2);
-	printk("sensor w RegTab: done, ret %d, cnt %d, time %d us \n", ret, cnt,
+	SENSOR_PRINT("sensor w RegTab: done, ret %d, cnt %d, time %d us \n", ret, cnt,
 		(uint32_t)((time2.tv_sec - time1.tv_sec)*1000000+(time2.tv_usec - time1.tv_usec)));
 	return ret;
 }
@@ -1712,7 +1712,7 @@ LOCAL long sensor_k_ioctl(struct file *file, unsigned int cmd,
 	case SENSOR_IO_I2C_WRITE_REGS:
 		{
 			struct sensor_reg_tab_tag regTab;
-			printk("SENSOR: ioctl SENSOR_IO_I2C_WRITE_REGS \n");
+			SENSOR_PRINT("SENSOR: ioctl SENSOR_IO_I2C_WRITE_REGS \n");
 			ret = copy_from_user(&regTab, (struct sensor_reg_tab_tag *) arg, sizeof(struct sensor_reg_tab_tag));
 			if (0 == ret)
 				ret = _sensor_k_wr_regtab(p_file, &regTab);

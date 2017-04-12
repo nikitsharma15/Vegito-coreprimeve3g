@@ -694,17 +694,15 @@ static int pullup(struct usb_gadget *gadget, int is_on)
 	struct gadget_wrapper *d;
 	int action = is_on;
 
+#ifndef DWC_DEVICE_ONLY	
+	if(!usb_get_id_state())
+		return 0;
+#endif
 	if (gadget == 0)
 		return -ENODEV;
 	else
 		d = container_of(gadget, struct gadget_wrapper, gadget);
 	d->softconnect = is_on;
-
-#ifndef DWC_DEVICE_ONLY
-	if(!usb_get_id_state())
-		return 0;
-#endif
-
 #ifdef CONFIG_USB_EXTERNAL_DETECT
 	if (!d->enabled || !d->vbus)
 	{

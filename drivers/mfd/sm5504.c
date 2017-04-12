@@ -366,8 +366,6 @@ static struct switch_dev switch_dock = {
 #endif
 //#endif
 
-static void sm5504_init_registers(sm5504_chip_t *chip);
-
 /*
  * Notifier list for muic-usb events
  */
@@ -783,7 +781,7 @@ static void sm5504_otg_attach_handler(struct sm5504_chip *chip,
 	RTINFO("OTG attached\n");
 	sm5504_reg_write(chip, SM5504_REG_MANUAL_SW1, 0x24);
 	/* Disable USBCHDEN and AutoConfig*/
-	sm5504_clr_bits(chip, SM5504_REG_CONTROL, (1 << 2));
+	sm5504_clr_bits(chip, SM5504_REG_CONTROL, (1 << 2) | (1 << 6));
 	if (chip->pdata->otg_callback)
 		chip->pdata->otg_callback(1);
 
@@ -802,7 +800,7 @@ static void sm5504_otg_detach_handler(struct sm5504_chip *chip,
 	RTINFO("OTG detached\n");
 	sm5504_reg_write(chip, SM5504_REG_MANUAL_SW1, 0x00);
 	/* Enable USBCHDEN and AutoConfig*/
-	sm5504_set_bits(chip, SM5504_REG_CONTROL, (1 << 2));
+	sm5504_set_bits(chip, SM5504_REG_CONTROL, (1 << 2) | (1 << 6));
 
 	if (chip->pdata->otg_callback)
 		chip->pdata->otg_callback(0);
@@ -1204,20 +1202,6 @@ static void sm5504_irq_work(sm5504_chip_t *chip)
          (int)chip->curr_status.id_adc);
 /* for printint out registers -- end*/
 
-	ret = sm5504_reg_read(chip, SM5504_REG_CONTROL);
-	if (ret < 0)
-	{
-		RTERR("%s line %d : return %d\n", __FUNCTION__,__LINE__,ret);
-	}
-	RTINFO("%s : CONTROL = 0x%x\n",__FUNCTION__, ret);
-
-	if ( ((ret&0xF0) != 0xE0) || (ret&0x01 == 0x01) ) {  // control register 肋给凳.
-		RTINFO("%s : SM5504 RESET \n",__FUNCTION__);
-		sm5504_reg_write(chip,SM5504_REG_RESET , 0x01);  // sm5504 reset
-		sm5504_init_registers(chip);
-		return;
-	}
-
 	if ( (chip->curr_status.id_adc == 0x17)
 		&& ( (chip->curr_status.irq_flags[0] & 0x01) == 0x01 )
 		&& ( (chip->curr_status.irq_flags[1] & 0x01) == 0x00 ) )
@@ -1340,11 +1324,10 @@ static void sm5504_init_work(struct work_struct *work)
     dev_info(&chip->iic->dev, "SM5504 : Battery and charger are ready\r\n");
 #endif
 	/* Dummy read */
-	ret = sm5504_reg_read(chip, SM5504_REG_INT_FLAG1);
-	RTINFO("INT1 = 0x%x \n", ret);
-	ret = sm5504_reg_read(chip, SM5504_REG_INT_FLAG2);
-	RTINFO("INT2 = 0x%x \n", ret);
-
+	sm5504_reg_read(chip, SM5504_REG_INT_FLAG1);
+	sm5504_clr_bits(chip, SM5504_REG_CONTROL, 0x60);
+	msleep_interruptible(1);
+	sm5504_set_bits(chip, SM5504_REG_CONTROL, 0x60);
 	/* enable interrupt */
 	ret = sm5504_clr_bits(chip, SM5504_REG_CONTROL, 0x01);
 	if (ret < 0) {
@@ -1368,36 +1351,6 @@ static void sm5504_init_regs(sm5504_chip_t *chip)
 	sm5504_reg_write(chip, 0x20,0x06);
 	queue_delayed_work(chip->wq, &chip->init_work, 0);
 }
-
-static void sm5504_init_registers(sm5504_chip_t *chip)
-{
-	int ret;
-
-	pr_info("[SM5504] %s \n", __FUNCTION__);
-
-	chip->curr_status.id_adc = 0x1f;
-	chip->adc_reg_addr = SM5504_REG_ADC;
-
-	/* Only mask Connect */
-	sm5504_reg_write(chip, SM5504_REG_INTERRUPT_MASK1, 0x20);
-	/* Only mask OCP_LATCH and POR */
-	sm5504_reg_write(chip, SM5504_REG_INTERRUPT_MASK2, 0x24);
-
-	sm5504_reg_write(chip, 0x20,0x06);
-
-	/* enable interrupt */
-	ret = sm5504_clr_bits(chip, SM5504_REG_CONTROL, 0x01);
-	if (ret < 0) {
-	    dev_err(&chip->iic->dev, "can't enable sm5504's INT (%d)\r\n",ret);
-	}
-
-	ret = sm5504_reg_read(chip, SM5504_REG_CONTROL);    
-	pr_info("[SM5504]%s CONTROL : 0x%x \n", __FUNCTION__, ret);
-    
-	return;
-}
-
-
 #ifdef CONFIG_MUIC_FACTORY_EVENT
 static ssize_t sm5504_muic_show_apo_factory(struct device *dev,
                                            struct device_attribute *attr,

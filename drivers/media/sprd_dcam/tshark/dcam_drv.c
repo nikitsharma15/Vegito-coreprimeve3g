@@ -2526,7 +2526,7 @@ int32_t    dcam_get_path_id(struct dcam_get_path_id *path_id, uint32_t *channel_
 		return -1;
 	}
 
-	printk("DCAM: fourcc 0x%x, w %d, h %d, %d %d \n",
+	DCAM_TRACE("DCAM: fourcc 0x%x, w %d, h %d, %d %d \n",
 		path_id->fourcc, path_id->input_size.w, path_id->input_size.h,
 		path_id->is_path_work[DCAM_PATH1], path_id->is_path_work[DCAM_PATH2]);
 

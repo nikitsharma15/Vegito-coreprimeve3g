@@ -2519,17 +2519,8 @@ static void sec_bat_monitor_work(
 		if ((battery->status == POWER_SUPPLY_STATUS_DISCHARGING) &&
 			(battery->ps_enable != true)) {
 			if ((unsigned long)(c_ts.tv_sec - old_ts.tv_sec) < 10 * 60) {
-				union power_supply_propval value;
-
-				psy_do_property(battery->pdata->fuelgauge_name, get,
-					POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
-				battery->voltage_now = value.intval;
-				sec_bat_get_temperature_info(battery);
-
-				power_supply_changed(&battery->psy_bat);
-
-				pr_info("Skip monitor work(%ld, Vnow:%dmV, Tbat:%d)\n",
-					c_ts.tv_sec - old_ts.tv_sec, battery->voltage_now, battery->temperature);
+				pr_info("Skip monitor_work(%ld)\n",
+						c_ts.tv_sec - old_ts.tv_sec);
 				goto skip_monitor;
 			}
 		}
@@ -2627,17 +2618,17 @@ continue_monitor:
 			"%s: battery->stability_test(%d), battery->eng_not_full_status(%d)\n",
 			__func__, battery->stability_test, battery->eng_not_full_status);
 #endif
-	if (battery->store_mode && !lpcharge && (battery->cable_type != POWER_SUPPLY_TYPE_BATTERY)) {
+	if (battery->store_mode && battery->cable_type != POWER_SUPPLY_TYPE_BATTERY) {
 
 		dev_info(battery->dev,
 			"%s: @battery->capacity = (%d), battery->status= (%d), battery->store_mode=(%d)\n",
 			__func__, battery->capacity, battery->status, battery->store_mode);
 
-		if ((battery->capacity >= STORE_MODE_CHARGING_MAX) && (battery->status == POWER_SUPPLY_STATUS_CHARGING)) {
+		if ((battery->capacity >= 35) && (battery->status == POWER_SUPPLY_STATUS_CHARGING)) {
 			battery->status = POWER_SUPPLY_STATUS_DISCHARGING;
 			sec_bat_set_charge(battery, false);
 		}
-		if ((battery->capacity <= STORE_MODE_CHARGING_MIN) && (battery->status == POWER_SUPPLY_STATUS_DISCHARGING)) {
+		if ((battery->capacity <= 30) && (battery->status == POWER_SUPPLY_STATUS_DISCHARGING)) {
 			battery->status = POWER_SUPPLY_STATUS_CHARGING;
 			sec_bat_set_charge(battery, true);
 		}
@@ -5414,11 +5405,7 @@ static int sec_battery_probe(struct platform_device *pdev)
 	battery->cable_type = POWER_SUPPLY_TYPE_BATTERY;
 	battery->test_mode = 0;
 	battery->factory_mode = false;
-#if defined(CONFIG_STORE_MODE)
-	battery->store_mode = true;
-#else
 	battery->store_mode = false;
-#endif
 	battery->slate_mode = false;
 	battery->is_hc_usb = false;
 
@@ -5804,8 +5791,6 @@ static void sec_battery_shutdown(struct device *dev)
 		= dev_get_drvdata(dev);
 	union power_supply_propval val;
 
-	dev_info(battery->dev, "%s: Start\n", __func__);
-
 	if (battery->pdata->always_enable) {
 		val.intval = 1;
 		psy_do_property(battery->pdata->charger_name, set,
@@ -5817,19 +5802,6 @@ static void sec_battery_shutdown(struct device *dev)
 		sec_bat_self_discharging_control(battery, false);
 	}
 #endif
-	switch (battery->pdata->polling_type) {
-		case SEC_BATTERY_MONITOR_WORKQUEUE:
-		cancel_delayed_work(&battery->polling_work);
-		break;
-	case SEC_BATTERY_MONITOR_ALARM:
-		alarm_cancel(&battery->polling_alarm);
-		break;
-	default:
-		break;
-	}
-
-	alarm_cancel(&battery->event_termination_alarm);
-	cancel_delayed_work_sync(&battery->monitor_work);
 
 	return;
 }

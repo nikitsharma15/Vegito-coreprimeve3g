@@ -62,7 +62,7 @@ MODULE_ALIAS("mmc:block");
 #define INAND_CMD38_ARG_SECERASE 0x80
 #define INAND_CMD38_ARG_SECTRIM1 0x81
 #define INAND_CMD38_ARG_SECTRIM2 0x88
-#define MMC_BLK_TIMEOUT_MS  (10 * 1000)	/* 10 seconds timeout */
+#define MMC_BLK_TIMEOUT_MS  (300)   /*(10 * 60 * 1000) to 300*//* 10 minute timeout */
 
 #define mmc_req_rel_wr(req)	((req->cmd_flags & REQ_FUA) && \
 				  (rq_data_dir(req) == WRITE))
@@ -818,7 +818,6 @@ static void mmc_error_count_log(struct mmc_card *card, int index, int error, u32
 static void mmc_card_error_logging(struct mmc_card *card, struct mmc_blk_request *brq, u32 status)
 {
 	int index = 0;
-	int error = 0;
 
 	if (brq->sbc.error)
 		mmc_error_count_log(card, index, brq->sbc.error, status);
@@ -833,12 +832,6 @@ static void mmc_card_error_logging(struct mmc_card *card, struct mmc_blk_request
 	if (brq->stop.error) {
 		index = 6;
 		mmc_error_count_log(card, index, brq->stop.error, status);
-	}
-	if (!(status & R1_READY_FOR_DATA) ||
-			 (R1_CURRENT_STATE(status) == R1_STATE_PRG)) {
-		index = 8;
-		error = -ETIMEDOUT;	// card stuck in prg state
-		mmc_error_count_log(card, index, error, status);
 	}
 
 	return;
@@ -871,7 +864,7 @@ static ssize_t error_count_show(struct device *dev,
 	total_len += snprintf(buf, PAGE_SIZE,
 			"type: err statuks: first_issue_time: last_issue_time: count\n");
 
-	for (i = 0; i < 10; i++) {
+	for (i = 0; i < 8; i++) {
 		total_len += snprintf(buf + (sizeof(char)*68*(i+1)), PAGE_SIZE,
 				"%4s:%4d 0x%08x %16llu, %16llu, %10d\n",
 				err_log[i].type, err_log[i].err_type,
@@ -932,8 +925,8 @@ static void mmc_card_debug_log_sysfs_init(struct mmc_card *card)
 	card->err_log[0].err_type = -EILSEQ;
 	card->err_log[1].err_type = -ETIMEDOUT;
 
-	snprintf(card->err_log[2].type, sizeof(char)*4, "cmd ");
-	snprintf(card->err_log[3].type, sizeof(char)*4, "cmd ");
+	snprintf(card->err_log[2].type, sizeof(char)*4, "I/O ");
+	snprintf(card->err_log[3].type, sizeof(char)*4, "I/O ");
 	card->err_log[2].err_type = -EILSEQ;
 	card->err_log[3].err_type = -ETIMEDOUT;
 
@@ -946,11 +939,6 @@ static void mmc_card_debug_log_sysfs_init(struct mmc_card *card)
 	snprintf(card->err_log[7].type, sizeof(char)*4, "stop");
 	card->err_log[6].err_type = -EILSEQ;
 	card->err_log[7].err_type = -ETIMEDOUT;
-
-	snprintf(card->err_log[8].type, sizeof(char)*4, "busy");
-	snprintf(card->err_log[9].type, sizeof(char)*4, "busy");
-	card->err_log[8].err_type = -EILSEQ;
-	card->err_log[9].err_type = -ETIMEDOUT;
 }
 #endif
 
@@ -1444,9 +1432,7 @@ static int mmc_blk_err_check(struct mmc_card *card,
 				pr_err("%s: Card stuck in programming state!"\
 					" %s %s\n", mmc_hostname(card->host),
 					req->rq_disk->disk_name, __func__);
-#ifdef MMC_CARD_ERROR_LOGGING
-				mmc_card_error_logging(card, brq, status);
-#endif
+
 				return MMC_BLK_CMD_ERR;
 			}
 			/*
@@ -2104,20 +2090,8 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 		case MMC_BLK_CMD_ERR:
 			printk("%s MMC_BLK_CMD_ERR\n",__func__);
 			ret = mmc_blk_cmd_err(md, card, brq, req, ret);
-			if (!mmc_blk_reset(md, card->host, type)) {
-				if (!ret) {
-                                        /*
-                                         * We have successfully completed block
-                                         * request and notified to upper layers.
-                                         * As the reset is successful, assume
-                                         * h/w is in clean state and proceed
-                                         * with new request.
-                                         */
-                                        BUG_ON(card->host->areq);
-                                        goto start_new_req;
-				}
+			if (!mmc_blk_reset(md, card->host, type))
 				break;
-			}
 			goto cmd_abort;
 		case MMC_BLK_ECC_ERR:
 			printk("%s MMC_BLK_ECC_ERR\n",__func__);

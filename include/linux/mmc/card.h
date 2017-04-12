@@ -246,7 +246,7 @@ struct mmc_part {
 
 #ifdef MMC_CARD_ERROR_LOGGING
 struct mmc_card_error_log {
-	char	type[4];	// sbc, cmd, data, stop, busy
+	char	type[4];	// sbc, cmd, data, stop
 	int	err_type;
 	u32	status;
 	u64	first_issue_time;
@@ -325,7 +325,7 @@ struct mmc_card {
 	unsigned int    nr_parts;
 #ifdef MMC_CARD_ERROR_LOGGING
 	struct device_attribute	error_count;
-	struct mmc_card_error_log err_log[10];
+	struct mmc_card_error_log err_log[8];
 #endif
 };
 
