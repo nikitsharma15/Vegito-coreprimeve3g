@@ -63,7 +63,7 @@ int ist30xx_batt_chk_cnt = 0;
 int ist30xx_batt_chk_max_cnt = IST30XX_MAX_CHK_CNT;
 #endif
 
-#define TOUCH_BOOSTER	1
+#define TOUCH_BOOSTER	0
 
 #if TOUCH_BOOSTER
 #include <linux/cpufreq.h>
