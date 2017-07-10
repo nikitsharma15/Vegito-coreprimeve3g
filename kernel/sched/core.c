@@ -120,10 +120,6 @@ void start_bandwidth_timer(struct hrtimer *period_timer, ktime_t period)
 DEFINE_MUTEX(sched_domains_mutex);
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
-#ifdef CONFIG_INTELLI_PLUG
-DEFINE_PER_CPU_SHARED_ALIGNED(struct nr_stats_s, runqueue_stats);
-#endif
- 
 static void update_rq_clock_task(struct rq *rq, s64 delta);
 
 void update_rq_clock(struct rq *rq)
@@ -191,12 +187,14 @@ struct static_key sched_feat_keys[__SCHED_FEAT_NR] = {
 
 static void sched_feat_disable(int i)
 {
-	static_key_disable(&sched_feat_keys[i]);
+	if (static_key_enabled(&sched_feat_keys[i]))
+		static_key_slow_dec(&sched_feat_keys[i]);
 }
 
 static void sched_feat_enable(int i)
 {
-	static_key_enable(&sched_feat_keys[i]);
+	if (!static_key_enabled(&sched_feat_keys[i]))
+		static_key_slow_inc(&sched_feat_keys[i]);
 }
 #else
 static void sched_feat_disable(int i) { };
@@ -516,16 +514,16 @@ static inline void init_hrtick(void)
 
 /*
  * cmpxchg based fetch_or, macro so it works for different integer types
- */
+*/
 #define fetch_or(ptr, val)						\
 ({	typeof(*(ptr)) __old, __val = *(ptr);				\
- 	for (;;) {							\
- 		__old = cmpxchg((ptr), __val, __val | (val));		\
- 		if (__old == __val)					\
- 			break;						\
- 		__val = __old;						\
- 	}								\
- 	__old;								\
+  	for (;;) {							\
+  		__old = cmpxchg((ptr), __val, __val | (val));		\
+  		if (__old == __val)					\
+  			break;						\
+  		__val = __old;						\
+  	}								\
+  	__old;								\
 })
 
 #ifdef TIF_POLLING_NRFLAG
@@ -536,14 +534,14 @@ static inline void init_hrtick(void)
  */
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
-	struct thread_info *ti = task_thread_info(p);
-	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
+ 	struct thread_info *ti = task_thread_info(p);
+ 	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
 }
 #else
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
-	set_tsk_need_resched(p);
-	return true;
+ 	set_tsk_need_resched(p);
+ 	return true;
 }
 #endif
 
@@ -569,9 +567,8 @@ void resched_task(struct task_struct *p)
 	if (cpu == smp_processor_id()) {
 		set_tsk_need_resched(p);
 		return;
-	}
-
-	if (set_nr_and_not_polling(p))
+        } 
+	if (set_nr_and_not_polling(p))	
 		smp_send_reschedule(cpu);
 }
 
@@ -1552,51 +1549,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	success = 1; /* we're going to change ->state */
 	cpu = task_cpu(p);
 
-	/*
-	 * Ensure we load p->on_rq _after_ p->state, otherwise it would
-	 * be possible to, falsely, observe p->on_rq == 0 and get stuck
-	 * in smp_cond_load_acquire() below.
-	 *
-	 * sched_ttwu_pending()                 try_to_wake_up()
-	 *   [S] p->on_rq = 1;                  [L] P->state
-	 *       UNLOCK rq->lock  -----.
-	 *                              \
-	 *				 +---   RMB
-	 * schedule()                   /
-	 *       LOCK rq->lock    -----'
-	 *       UNLOCK rq->lock
-	 *
-	 * [task p]
-	 *   [S] p->state = UNINTERRUPTIBLE     [L] p->on_rq
-	 *
-	 * Pairs with the UNLOCK+LOCK on rq->lock from the
-	 * last wakeup of our task and the schedule that got our task
-	 * current.
-	 */
-	smp_rmb();
 	if (p->on_rq && ttwu_remote(p, wake_flags))
 		goto stat;
 
 #ifdef CONFIG_SMP
-	/*
-	 * Ensure we load p->on_cpu _after_ p->on_rq, otherwise it would be
-	 * possible to, falsely, observe p->on_cpu == 0.
-	 *
-	 * One must be running (->on_cpu == 1) in order to remove oneself
-	 * from the runqueue.
-	 *
-	 *  [S] ->on_cpu = 1;	[L] ->on_rq
-	 *      UNLOCK rq->lock
-	 *			RMB
-	 *      LOCK   rq->lock
-	 *  [S] ->on_rq = 0;    [L] ->on_cpu
-	 *
-	 * Pairs with the full barrier implied in the UNLOCK+LOCK on rq->lock
-	 * from the consecutive calls to schedule(); the first switching to our
-	 * task, the second putting it to sleep.
-	 */
-	smp_rmb();
-
 	/*
 	 * If the owning (remote) cpu is still in the middle of schedule() with
 	 * this task as prev, wait until its done referencing the task.
@@ -1679,6 +1635,7 @@ out:
  */
 int wake_up_process(struct task_struct *p)
 {
+	WARN_ON(task_is_stopped_or_traced(p));
 	return try_to_wake_up(p, TASK_NORMAL, 0);
 }
 EXPORT_SYMBOL(wake_up_process);
@@ -2185,61 +2142,6 @@ unsigned long this_cpu_load(void)
 	struct rq *this = this_rq();
 	return this->cpu_load[0];
 }
-
-#ifdef CONFIG_INTELLI_PLUG
-unsigned long avg_nr_running(void)
-{
- 	unsigned long i, sum = 0;
- 	unsigned int seqcnt, ave_nr_running;
- 
- 	for_each_online_cpu(i) {
- 		struct nr_stats_s *stats = &per_cpu(runqueue_stats, i);
- 		struct rq *q = cpu_rq(i);
- 
- 		/*
- 		 * Update average to avoid reading stalled value if there were
- 		 * no run-queue changes for a long time. On the other hand if
- 		 * the changes are happening right now, just read current value
- 		 * directly.
- 		 */
- 		seqcnt = read_seqcount_begin(&stats->ave_seqcnt);
- 		ave_nr_running = do_avg_nr_running(q);
- 		if (read_seqcount_retry(&stats->ave_seqcnt, seqcnt)) {
- 			read_seqcount_begin(&stats->ave_seqcnt);
- 			ave_nr_running = stats->ave_nr_running;
- 		}
- 
- 		sum += ave_nr_running;
- 	}
- 
- 	return sum;
-}
-EXPORT_SYMBOL(avg_nr_running);
-
-unsigned long avg_cpu_nr_running(unsigned int cpu)
-{
- 	unsigned int seqcnt, ave_nr_running;
- 
- 	struct nr_stats_s *stats = &per_cpu(runqueue_stats, cpu);
- 	struct rq *q = cpu_rq(cpu);
- 
- 	/*
- 	 * Update average to avoid reading stalled value if there were
- 	 * no run-queue changes for a long time. On the other hand if
- 	 * the changes are happening right now, just read current value
- 	 * directly.
- 	 */
- 	seqcnt = read_seqcount_begin(&stats->ave_seqcnt);
- 	ave_nr_running = do_avg_nr_running(q);
- 	if (read_seqcount_retry(&stats->ave_seqcnt, seqcnt)) {
- 		read_seqcount_begin(&stats->ave_seqcnt);
- 		ave_nr_running = stats->ave_nr_running;
- 	}
- 
- 	return ave_nr_running;
-}
-EXPORT_SYMBOL(avg_cpu_nr_running);
-#endif
 
 #ifdef CONFIG_RUNTIME_COMPCACHE
 unsigned long this_cpu_loadx(int i)
@@ -5404,7 +5306,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 
 	case CPU_UP_PREPARE:
 		rq->calc_load_update = calc_load_update;
-		account_reset_rq(rq);
 		break;
 
 	case CPU_ONLINE:
