@@ -48,13 +48,10 @@
 #define GR_GEN1			(REG_GLB_GEN1)
 #endif
 
-#define FREQ_TABLE_SIZE 	15
+#define FREQ_TABLE_SIZE 	10
 #define DVFS_BOOT_TIME	(30 * HZ)
 #define SHARK_TDPLL_FREQUENCY	(768000)
 #define TRANSITION_LATENCY	(50 * 1000) /* ns */
-
-#define MAX_VOLT (1200 * 1000)
-#define MIN_VOLT (800  * 1000)
 
 static DEFINE_MUTEX(freq_lock);
 struct cpufreq_freqs global_freqs;
@@ -68,53 +65,246 @@ struct cpufreq_conf {
 	struct clk 					*tdpllclk;
 	struct regulator 				*regulator;
 	struct cpufreq_frequency_table			*freq_tbl;
-	unsigned long					*vddarm_mv;
+	unsigned int					*vddarm_mv;
 };
 
 struct cpufreq_table_data {
 	struct cpufreq_frequency_table 		freq_tbl[FREQ_TABLE_SIZE];
-	unsigned long				vddarm_mv[FREQ_TABLE_SIZE];
+	unsigned int				vddarm_mv[FREQ_TABLE_SIZE];
 };
 
 struct cpufreq_conf *sprd_cpufreq_conf = NULL;
 static struct mutex cpufreq_vddarm_lock;
 
-enum clocking_levels {
-	OC1,
-	NOC, UC1, UC2, UC3,
-	UC4, UC5, UC6, UC7, UC8,
-	MIN_CL=UC8,
-	EC,
+#if defined(CONFIG_ARCH_SC8825)
+static struct cpufreq_table_data sc8825_cpufreq_table_data = {
+	.freq_tbl =	{
+		{0, 1000000},
+		{1, 500000},
+		{2, CPUFREQ_TABLE_END}
+	},
+	.vddarm_mv = {
+		0
+	},
 };
+
+struct cpufreq_conf sc8825_cpufreq_conf = {
+	.clk = NULL,
+	.regulator = NULL,
+	.freq_tbl = sc8825_cpufreq_table_data.freq_tbl,
+	.vddarm_mv = sc8825_cpufreq_table_data.vddarm_mv,
+};
+
+static void set_mcu_clk_freq(u32 mcu_freq)
+{
+	u32 val, rate, arm_clk_div, gr_gen1;
+
+	rate = mcu_freq / MHz;
+	switch(1000 / rate)
+	{
+		case 1:
+			arm_clk_div = 0;
+			break;
+		case 2:
+			arm_clk_div = 1;
+			break;
+		default:
+			panic("set_mcu_clk_freq fault\n");
+			break;
+	}
+	pr_debug("%s --- before, AHB_ARM_CLK: %08x, rate = %d, div = %d\n",
+		__func__, __raw_readl(REG_AHB_ARM_CLK), rate, arm_clk_div);
+
+	gr_gen1 =  __raw_readl(GR_GEN1);
+	gr_gen1 |= BIT(9);
+	__raw_writel(gr_gen1, GR_GEN1);
+
+	val = __raw_readl(REG_AHB_ARM_CLK);
+	val &= 0xfffffff8;
+	val |= arm_clk_div;
+	__raw_writel(val, REG_AHB_ARM_CLK);
+
+	gr_gen1 &= ~BIT(9);
+	__raw_writel(gr_gen1, GR_GEN1);
+
+	pr_debug("%s --- after, AHB_ARM_CLK: %08x, rate = %d, div = %d\n",
+		__func__, __raw_readl(REG_AHB_ARM_CLK), rate, arm_clk_div);
+
+	return;
+}
+
+static unsigned int get_mcu_clk_freq(void)
+{
+	u32 mpll_refin, mpll_n, mpll_cfg = 0, rate, val;
+
+	mpll_cfg = __raw_readl(GR_MPLL_MN);
+
+	mpll_refin = (mpll_cfg >> GR_MPLL_REFIN_SHIFT) & GR_MPLL_REFIN_MASK;
+	switch(mpll_refin){
+		case 0:
+			mpll_refin = GR_MPLL_REFIN_2M;
+			break;
+		case 1:
+		case 2:
+			mpll_refin = GR_MPLL_REFIN_4M;
+			break;
+		case 3:
+			mpll_refin = GR_MPLL_REFIN_13M;
+			break;
+		default:
+			pr_err("%s mpll_refin: %d\n", __FUNCTION__, mpll_refin);
+	}
+	mpll_n = mpll_cfg & GR_MPLL_N_MASK;
+	rate = mpll_refin * mpll_n;
+
+	/*find div */
+	val = __raw_readl(REG_AHB_ARM_CLK) & 0x7;
+	val += 1;
+	return rate / val;
+}
+#endif
+
+static struct cpufreq_table_data sc8830_cpufreq_table_data_cs = {
+	.freq_tbl = {
+		{0, 1200000},
+		{1, 1000000},
+		{2, SHARK_TDPLL_FREQUENCY},
+		{3, 600000},
+		{4, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1300000,
+		1200000,
+		1150000,
+		1100000,
+		1000000,
+	},
+};
+
+/*
+for 7715 test
+*/
+static struct cpufreq_table_data sc7715_cpufreq_table_data = {
+	.freq_tbl = {
+		{0, 1000000},
+		{1, SHARK_TDPLL_FREQUENCY},
+		{2, 600000},
+		{3, SHARK_TDPLL_FREQUENCY/2},
+		{4, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1200000,
+		1150000,
+		1100000,
+		1100000,
+		1000000,
+	},
+};
+
+
+static struct cpufreq_table_data sc8830_cpufreq_table_data_es = {
+	.freq_tbl = {
+		{0, 1000000},
+		{1, SHARK_TDPLL_FREQUENCY},
+		{2, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1250000,
+		1200000,
+		1000000,
+	},
+};
+
 static struct cpufreq_table_data sc8830t_cpufreq_table_data_es = {
         .freq_tbl = {
-		{OC1, 1500000},
-		{NOC, 1300000},
-		{UC1, 1200000},
-		{UC2, 1100000},
-		{UC3, 1000000},
-		{UC4, 900000},
-		{UC5, 800000},
-		{UC6, 700000},
-		{UC7, 600000},
-		{UC8, 500000},
-		{EC,  CPUFREQ_TABLE_END},
+                {0, 1300000},
+                {1, 1200000},
+                {2, 1000000},
+                {3, SHARK_TDPLL_FREQUENCY},
+                {4, CPUFREQ_TABLE_END},
         },
         .vddarm_mv = {
-		[OC1]  = 1125000,
-		[NOC]  = 1050000,
-		[UC1]  = 950000,
-		[UC2]  = 900000,
-		[UC3]  = 900000,
-		[UC4]  = 900000,
-		[UC5]  = 900000,
-		[UC6]  = 900000,
-		[UC7]  = 900000,
-		[UC8]  = 900000,
-		[EC]   = 900000,
+                1050000,
+                1000000,
+                900000,
+                900000,
+                900000,
         },
 };
 
+static struct cpufreq_table_data sc8830t_cpufreq_table_data_es_1300 = {
+        .freq_tbl = {
+                {0, 1300000},
+                {1, 1200000},
+                {2, 1000000},
+                {3, SHARK_TDPLL_FREQUENCY},
+                {4, CPUFREQ_TABLE_END},
+        },
+        .vddarm_mv = {
+                1050000,
+                1000000,
+                900000,
+                900000,
+                900000,
+        },
+};
+
+static struct cpufreq_table_data sc9630_cpufreq_table_data = {
+	.freq_tbl = {
+		{0, 1500000},
+		{1, 1350000},
+		{2, 900000},
+		{3, 768000},
+		{4, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1100000,
+		1000000,
+		900000,
+		900000,
+		900000,
+	},
+};
+
+static struct cpufreq_table_data sc7720_cpufreq_table_data = {
+	.freq_tbl = {
+		{0, 1200000},
+		{1, 813000},
+		{2, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1200000,
+		1050000,
+		1050000,
+	},
+};
+
+static struct cpufreq_table_data sc9631l64_cpufreq_table_data_es = {
+	.freq_tbl = {
+		{0, 1300000},
+		{1, 1000000},
+		{2, SHARK_TDPLL_FREQUENCY},
+		{3, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1000000,
+		900000,
+		900000,
+		900000,
+	},
+};
+static struct cpufreq_table_data sc9820_cpufreq_table_data = {
+	.freq_tbl = {
+		{0, 1250000},
+		{1, 800000},
+		{2, CPUFREQ_TABLE_END},
+	},
+	.vddarm_mv = {
+		1200000,
+		1050000,
+		1050000,
+	},
+};
 struct cpufreq_conf sc8830_cpufreq_conf = {
 	.clk = NULL,
 	.mpllclk = NULL,
@@ -306,10 +496,10 @@ static void sprd_find_real_index(unsigned int new_speed, int *index)
 	int i;
 	struct cpufreq_frequency_table *pfreq = sprd_cpufreq_conf->freq_tbl;
 
-	*index = pfreq[0].driver_data;
+	*index = pfreq[0].index;
 	for (i = 0; (pfreq[i].frequency != CPUFREQ_TABLE_END); i++) {
 		if (new_speed == pfreq[i].frequency) {
-			*index = pfreq[i].driver_data;
+			*index = pfreq[i].index;
 			break;
 		}
 	}
@@ -354,8 +544,8 @@ static int sprd_cpufreq_verify_speed(struct cpufreq_policy *policy)
 	return cpufreq_frequency_table_verify(policy, sprd_cpufreq_conf->freq_tbl);
 }
 
-unsigned int cpufreq_min_limit = 200000;
-unsigned int cpufreq_max_limit = 1300000;
+unsigned int cpufreq_min_limit = ULONG_MAX;
+unsigned int cpufreq_max_limit = 0;
 unsigned int dvfs_score_select = 5;
 unsigned int dvfs_unplug_select = 2;
 unsigned int dvfs_plug_select = 0;
@@ -379,9 +569,11 @@ static int sprd_cpufreq_target(struct cpufreq_policy *policy,
 	struct cpufreq_frequency_table *table;
 	int max_freq = cpufreq_max_limit;
 	int min_freq = cpufreq_min_limit;
+	int cur_freq = 0;
+	unsigned long irq_flags;
 
 	/* delay 30s to enable dvfs&dynamic-hotplug,
-         * except requirment from thermal-cooling device
+         * except requirment from termal-cooling device
          */
 	if(time_before(jiffies, boot_done)){
 		return 0;
@@ -426,10 +618,14 @@ static unsigned int sprd_cpufreq_getspeed(unsigned int cpu)
 	return sprd_raw_get_cpufreq();
 }
 
-static void sprd_set_cpufreq_limit(void)
+static void sprd_set_cpureq_limit(void)
 {
-	cpufreq_min_limit = sprd_cpufreq_conf->freq_tbl[MIN_CL].frequency;
-	cpufreq_max_limit = sprd_cpufreq_conf->freq_tbl[OC1].frequency;
+	int i;
+	struct cpufreq_frequency_table *tmp = sprd_cpufreq_conf->freq_tbl;
+	for (i = 0; (tmp[i].frequency != CPUFREQ_TABLE_END); i++) {
+		cpufreq_min_limit = min(tmp[i].frequency, cpufreq_min_limit);
+		cpufreq_max_limit = max(tmp[i].frequency, cpufreq_max_limit);
+	}
 	pr_info("--xing-- %s max=%u min=%u\n", __func__, cpufreq_max_limit, cpufreq_min_limit);
 }
 
@@ -440,11 +636,66 @@ static void sprd_set_cpufreq_limit(void)
 #endif
 static int sprd_freq_table_init(void)
 {
-	/* Instantly initialize frequency table, no need detecting - koquantam */
-	sprd_cpufreq_conf->freq_tbl = sc8830t_cpufreq_table_data_es.freq_tbl;
-	sprd_cpufreq_conf->vddarm_mv = sc8830t_cpufreq_table_data_es.vddarm_mv;
+	/* we init freq table here depends on which chip being used */
+	if (soc_is_scx35_v0()) {
+		pr_info("%s es_chip\n", __func__);
+		sprd_cpufreq_conf->freq_tbl =
+			sc8830_cpufreq_table_data_es.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc8830_cpufreq_table_data_es.vddarm_mv;
+	} else if (soc_is_scx35_v1()) {
+		pr_info("%s cs_chip\n", __func__);
+		sprd_cpufreq_conf->freq_tbl =
+			sc8830_cpufreq_table_data_cs.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc8830_cpufreq_table_data_cs.vddarm_mv;
+	} else if (soc_is_sc7715()) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc7715_cpufreq_table_data.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc7715_cpufreq_table_data.vddarm_mv;
+	} else if (soc_is_scx35g_v0() || soc_is_scx30g2_v0()) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc8830t_cpufreq_table_data_es.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc8830t_cpufreq_table_data_es.vddarm_mv;
+	} else if (soc_is_scx9630_v0()) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc9630_cpufreq_table_data.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc9630_cpufreq_table_data.vddarm_mv;
+	} else if (soc_is_scx9820_v0()) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc9820_cpufreq_table_data.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc9820_cpufreq_table_data.vddarm_mv;
+	} else if (soc_is_scx7720_v0()) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc7720_cpufreq_table_data.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc7720_cpufreq_table_data.vddarm_mv;
+#if defined (CONFIG_ARCH_SCX35LT8)	//TODO
+	} else if(__raw_readl(REG_AON_APB_CHIP_ID0) == 0x96310000){
+                 sprd_cpufreq_conf->freq_tbl =
+				 	sc9631l64_cpufreq_table_data_es.freq_tbl;
+                 sprd_cpufreq_conf->vddarm_mv =
+				 	sc9631l64_cpufreq_table_data_es.vddarm_mv;
+#else
+	} else if (__raw_readl(AON_APB_CHIP_ID) == 0x96310000) {
+		sprd_cpufreq_conf->freq_tbl =
+			sc9631l64_cpufreq_table_data_es.freq_tbl;
+		sprd_cpufreq_conf->vddarm_mv =
+			sc9631l64_cpufreq_table_data_es.vddarm_mv;
+#endif
+	} else {
+#if defined(CONFIG_ARCH_SCX35LT8)
+	        pr_info("D-die chip id = 0x%08X\n", __raw_readl(REG_AON_APB_CHIP_ID0));
+#endif
+		pr_err("%s error chip id\n", __func__);
+		return -EINVAL;
+	}
 	pr_info("sprd_freq_table_init \n");
-	sprd_set_cpufreq_limit();
+	sprd_set_cpureq_limit();
 	return 0;
 }
 
@@ -470,10 +721,11 @@ static int sprd_cpufreq_init(struct cpufreq_policy *policy)
 	if (ret != 0)
 		pr_err("%s Failed to config freq table: %d\n", __func__, ret);
 
-	pr_info("%s cpu=%d, cur=%u, ret=%d\n",
+
+	pr_info("%s policy->cpu=%d, policy->cur=%u, ret=%d\n",
 		__func__, policy->cpu, policy->cur, ret);
 
-	cpumask_setall(policy->cpus);
+       cpumask_setall(policy->cpus);
 
 	return ret;
 }
@@ -488,51 +740,6 @@ static struct freq_attr *sprd_cpufreq_attr[] = {
 	NULL,
 };
 
-ssize_t sprd_vdd_get(char *buf) {
-	int i, len = 0;
-
-#define freq_table sprd_cpufreq_conf->freq_tbl[i].frequency
-#define voltage_table sprd_cpufreq_conf->vddarm_mv[i]
-
-	for (i = 0; i <= MIN_CL; i++) {
-		len += sprintf(buf + len, "%umhz: %lu mV\n", freq_table / 1000, voltage_table / 1000);
-	}
-	return len;
-}
-
-void sprd_vdd_set(const char *buf) {
-	int ret = -EINVAL;
-	int i = 0;
-	int j = 0;
-	int u[MIN_CL + 1];
-	while (j < MIN_CL + 1) {
-		int consumed;
-		int val;
-		ret = sscanf(buf, "%d%n", &val, &consumed);
-		if (ret > 0) {
-			buf += consumed;
-			u[j++] = val;
-		}
-		else {
-			break;
-		}
-	}
-
-	for (i = 0; i < j; i++) {
-		if (u[i] > MAX_VOLT / 1000) {
-			u[i] = MAX_VOLT / 1000;
-		}
-         if( u[i] % 25 == 0 ) {
-		 sprd_cpufreq_conf->vddarm_mv[i] = u[i] * 1000; }
-	}
-   return;
-}
-
-static struct vdd_levels_control sprd_vdd_control = {
-      .get = sprd_vdd_get,
-      .set = sprd_vdd_set,
-};
-
 static struct cpufreq_driver sprd_cpufreq_driver = {
 	.verify		= sprd_cpufreq_verify_speed,
 	.target		= sprd_cpufreq_target,
@@ -541,8 +748,9 @@ static struct cpufreq_driver sprd_cpufreq_driver = {
 	.exit		= sprd_cpufreq_exit,
 	.name		= "sprd",
 	.attr		= sprd_cpufreq_attr,
-	.volt_control 	= &sprd_vdd_control,
+#if defined(CONFIG_ARCH_SCX35)
 	.flags		= CPUFREQ_SHARED
+#endif
 };
 
 static ssize_t cpufreq_min_limit_show(struct device *dev, struct device_attribute *attr,char *buf)
@@ -727,7 +935,7 @@ static ssize_t dvfs_plug_show(struct device *dev, struct device_attribute *attr,
 
 	return strlen(buf) + 1;
 }
-#endif /* CONFIG_CPU_FREQ_DEFAULT_GOV_SPRDEMAND */
+#endif
 
 static ssize_t cpufreq_table_show(struct device *dev, struct device_attribute *attr,char *buf)
 {
@@ -739,6 +947,7 @@ static ssize_t dvfs_prop_store(struct device *dev, struct device_attribute *attr
 {
 	int ret;
 	int value;
+	unsigned long irq_flags;
 
 	printk(KERN_ERR"dvfs_status %s\n",buf);
 	ret = strict_strtoul(buf,16,(long unsigned int *)&value);
@@ -836,8 +1045,14 @@ static struct notifier_block sprd_cpufreq_policy_nb = {
 static int __init sprd_cpufreq_modinit(void)
 {
 	int ret;
-	sprd_cpufreq_conf = &sc8830_cpufreq_conf;
 
+#if defined(CONFIG_ARCH_SCX35)
+	sprd_cpufreq_conf = &sc8830_cpufreq_conf;
+#elif defined(CONFIG_ARCH_SC8825)
+	sprd_cpufreq_conf = &sc8825_cpufreq_conf;
+#endif
+
+#if defined(CONFIG_ARCH_SCX35)
 	ret = sprd_freq_table_init();
 	if (ret)
 		return ret;
@@ -853,9 +1068,16 @@ static int __init sprd_cpufreq_modinit(void)
 	if (IS_ERR(sprd_cpufreq_conf->mpllclk))
 		return PTR_ERR(sprd_cpufreq_conf->mpllclk);
 
+#if !defined(CONFIG_ARCH_SCX35L) && !defined(CONFIG_ARCH_SCX20)
 	sprd_cpufreq_conf->tdpllclk = clk_get_sys(NULL, "clk_tdpll");
 	if (IS_ERR(sprd_cpufreq_conf->tdpllclk))
 		return PTR_ERR(sprd_cpufreq_conf->tdpllclk);
+#else
+//	sprd_cpufreq_conf->tdpllclk = clk_get_sys(NULL, "clk_twpll");
+	sprd_cpufreq_conf->tdpllclk = clk_get_sys(NULL, "clk_768m");
+	if (IS_ERR(sprd_cpufreq_conf->tdpllclk))
+		return PTR_ERR(sprd_cpufreq_conf->tdpllclk);
+#endif
 	mutex_init(&cpufreq_vddarm_lock);
 
 	sprd_cpufreq_conf->regulator = regulator_get(NULL, "vddarm");
@@ -876,6 +1098,8 @@ static int __init sprd_cpufreq_modinit(void)
 	clk_set_parent(sprd_cpufreq_conf->clk, sprd_cpufreq_conf->mpllclk);
 	global_freqs.old = sprd_raw_get_cpufreq();
 
+#endif
+
 	boot_done = jiffies + DVFS_BOOT_TIME;
 	ret = cpufreq_register_notifier(
 		&sprd_cpufreq_policy_nb, CPUFREQ_POLICY_NOTIFIER);
@@ -890,9 +1114,10 @@ static int __init sprd_cpufreq_modinit(void)
 
 static void __exit sprd_cpufreq_modexit(void)
 {
+#if defined(CONFIG_ARCH_SCX35)
 	if (!IS_ERR_OR_NULL(sprd_cpufreq_conf->regulator))
 		regulator_put(sprd_cpufreq_conf->regulator);
-
+#endif
 	cpufreq_unregister_driver(&sprd_cpufreq_driver);
 	cpufreq_unregister_notifier(
 		&sprd_cpufreq_policy_nb, CPUFREQ_POLICY_NOTIFIER);
