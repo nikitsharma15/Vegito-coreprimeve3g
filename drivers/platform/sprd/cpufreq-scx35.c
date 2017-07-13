@@ -48,13 +48,13 @@
 #define GR_GEN1			(REG_GLB_GEN1)
 #endif
 
-#define FREQ_TABLE_SIZE 	12	
+#define FREQ_TABLE_SIZE 	15
 #define DVFS_BOOT_TIME	(30 * HZ)
 #define SHARK_TDPLL_FREQUENCY	(768000)
 #define TRANSITION_LATENCY	(50 * 1000) /* ns */
 
-#define MAX_VOLT (1000 * 1000)
-#define MIN_VOLT (800 * 1000)
+#define MAX_VOLT (1200 * 1000)
+#define MIN_VOLT (800  * 1000)
 
 static DEFINE_MUTEX(freq_lock);
 struct cpufreq_freqs global_freqs;
@@ -80,40 +80,38 @@ struct cpufreq_conf *sprd_cpufreq_conf = NULL;
 static struct mutex cpufreq_vddarm_lock;
 
 enum clocking_levels {
-	OC2, OC1,
-	NOC, UC1, UC2, UC3, UC4,
-	UC5, UC6, UC7, UC8,
+	OC1,
+	NOC, UC1, UC2, UC3,
+	UC4, UC5, UC6, UC7, UC8,
 	MIN_CL=UC8,
 	EC,
 };
 static struct cpufreq_table_data sc8830t_cpufreq_table_data_es = {
         .freq_tbl = {
-		{OC2, 1536000},
-		{OC1, 1363200},
+		{OC1, 1500000},
 		{NOC, 1300000},
-		{UC1, 1190400},
-		{UC2, 1036800},
-		{UC3, 960000},
-		{UC4, 800000},
-		{UC5, SHARK_TDPLL_FREQUENCY},
-		{UC6, 729600},
-                {UC7, 576000},
-                {UC8, 345600},  
+		{UC1, 1200000},
+		{UC2, 1100000},
+		{UC3, 1000000},
+		{UC4, 900000},
+		{UC5, 800000},
+		{UC6, 700000},
+		{UC7, 600000},
+		{UC8, 500000},
 		{EC,  CPUFREQ_TABLE_END},
         },
         .vddarm_mv = {
-		[OC2]  = 1015000,
-		[OC1]  = 990000,
-		[NOC]  = 965000,
-		[UC1]  = 940000,
-		[UC2]  = 915000,
-		[UC3]  = 890000,
-		[UC4]  = 865000,
-		[UC5]  = 840000,
-		[UC6]  = 820000,
-                [UC7]  = 820000,
-                [UC8]  = 810000,
-		[EC]   = 800000,
+		[OC1]  = 1125000,
+		[NOC]  = 1050000,
+		[UC1]  = 950000,
+		[UC2]  = 900000,
+		[UC3]  = 900000,
+		[UC4]  = 900000,
+		[UC5]  = 900000,
+		[UC6]  = 900000,
+		[UC7]  = 900000,
+		[UC8]  = 900000,
+		[EC]   = 900000,
         },
 };
 
@@ -431,7 +429,7 @@ static unsigned int sprd_cpufreq_getspeed(unsigned int cpu)
 static void sprd_set_cpufreq_limit(void)
 {
 	cpufreq_min_limit = sprd_cpufreq_conf->freq_tbl[MIN_CL].frequency;
-	cpufreq_max_limit = sprd_cpufreq_conf->freq_tbl[OC2].frequency;
+	cpufreq_max_limit = sprd_cpufreq_conf->freq_tbl[OC1].frequency;
 	pr_info("--xing-- %s max=%u min=%u\n", __func__, cpufreq_max_limit, cpufreq_min_limit);
 }
 
