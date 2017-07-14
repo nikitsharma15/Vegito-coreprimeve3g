@@ -161,7 +161,8 @@ void ist30xx_enable_irq(struct ist30xx_data *data)
 void ist30xx_scheduled_reset(struct ist30xx_data *data)
 {
 	if (likely(data->initialized))
-		schedule_delayed_work(&data->work_reset_check, 0);
+		queue_delayed_work(system_power_efficient_wq,
+                      &data->work_reset_check, 0);
 }
 
 static void ist30xx_request_reset(struct ist30xx_data *data)
@@ -1285,23 +1286,27 @@ void timer_handler(unsigned long timer_data)
 			if (unlikely(status->calib == 1)) { // Check calibration
 				if ((status->calib_msg & CALIB_MSG_MASK) == CALIB_MSG_VALID) {
 					tsp_info("Calibration check OK!!\n");
-					schedule_delayed_work(&data->work_reset_check, 0);
+					queue_delayed_work(system_power_efficient_wq,
+                                               &data->work_reset_check, 0);
 					status->calib = 0;
 				} else if (timer_ms - event_ms >= 3000) { // 3second
 					tsp_info("calibration timeout over 3sec\n");
-					schedule_delayed_work(&data->work_reset_check, 0);
+					queue_delayed_work(system_power_efficient_wq,
+                                               &data->work_reset_check, 0);
 					status->calib = 0;
 				}
 			} else if (likely(status->noise_mode)) {
 				if (timer_ms - event_ms > 100) // 100ms after last interrupt
-					schedule_delayed_work(&data->work_noise_protect, 0);
+					queue_delayed_work(system_power_efficient_wq,
+                                               &data->work_noise_protect, 0);
 			}
 
 #if IST30XX_ALGORITHM_MODE
 			if ((ist30xx_algr_addr >= IST30XX_DIRECT_ACCESS) &&
 				(ist30xx_algr_size > 0)) {
 				if (timer_ms - event_ms > 100) // 100ms after last interrupt
-					schedule_delayed_work(&data->work_debug_algorithm, 0);
+					queue_delayed_work(system_power_efficient_wq,
+                                               &data->work_debug_algorithm, 0);
 			}
 #endif
 		}
@@ -1548,7 +1553,8 @@ static int ist30xx_probe(struct i2c_client *client,
 #if IST30XX_INTERNAL_BIN
 #if IST30XX_UPDATE_BY_WORKQUEUE
 	INIT_DELAYED_WORK(&data->work_fw_update, fw_update_func);
-	schedule_delayed_work(&data->work_fw_update, IST30XX_UPDATE_DELAY);
+	queue_delayed_work(system_power_efficient_wq,
+                 &data->work_fw_update, IST30XX_UPDATE_DELAY);
 #else
 	ret = ist30xx_auto_bin_update(data);
 	if (unlikely(ret != 0))
